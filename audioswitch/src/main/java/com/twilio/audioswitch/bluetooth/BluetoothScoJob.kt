@@ -1,13 +1,14 @@
 package com.twilio.audioswitch.bluetooth
 
 import android.os.Handler
+import androidx.annotation.VisibleForTesting
+import androidx.annotation.VisibleForTesting.PRIVATE
 import com.twilio.audioswitch.android.LogWrapper
 import com.twilio.audioswitch.android.SystemClockWrapper
-import com.twilio.audioswitch.bluetooth.BluetoothDeviceConnectionListener.ConnectionError
 import java.util.concurrent.TimeoutException
 
 internal const val TIMEOUT = 5000L
-private const val TAG = "BluetoothScoManager"
+private const val TAG = "BluetoothScoJob"
 
 internal abstract class BluetoothScoJob(
     private val logger: LogWrapper,
@@ -15,11 +16,12 @@ internal abstract class BluetoothScoJob(
     private val systemClockWrapper: SystemClockWrapper
 ) {
 
-    var bluetoothScoRunnable: BluetoothScoRunnable = BluetoothScoRunnable()
+    @VisibleForTesting(otherwise = PRIVATE)
+    var bluetoothScoRunnable: BluetoothScoRunnable? = null
+    @VisibleForTesting(otherwise = PRIVATE)
     var deviceListener: BluetoothDeviceConnectionListener? = null
 
     protected abstract val scoAction: () -> Unit
-    protected abstract val timeoutError: ConnectionError
 
     fun executeBluetoothScoJob() {
         bluetoothScoRunnable = BluetoothScoRunnable()
@@ -28,8 +30,11 @@ internal abstract class BluetoothScoJob(
     }
 
     fun cancelBluetoothScoJob() {
-        bluetoothScoHandler.removeCallbacks(bluetoothScoRunnable)
-        logger.d(TAG, "Canceled bluetooth sco job")
+        bluetoothScoRunnable?.let {
+            bluetoothScoHandler.removeCallbacks(bluetoothScoRunnable)
+            bluetoothScoRunnable = null
+            logger.d(TAG, "Canceled bluetooth sco job")
+        }
     }
 
     inner class BluetoothScoRunnable : Runnable {
@@ -45,7 +50,7 @@ internal abstract class BluetoothScoJob(
                 bluetoothScoHandler.postDelayed(this, 500)
             } else {
                 logger.e(TAG, "Bluetooth sco job timed out", TimeoutException())
-                deviceListener?.onBluetoothConnectionError(timeoutError)
+                deviceListener?.onBluetoothDeviceStateChanged()
                 cancelBluetoothScoJob()
             }
         }

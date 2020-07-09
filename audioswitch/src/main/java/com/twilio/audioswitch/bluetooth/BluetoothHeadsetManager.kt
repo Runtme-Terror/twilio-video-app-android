@@ -6,11 +6,10 @@ import android.bluetooth.BluetoothProfile
 import com.twilio.audioswitch.android.BluetoothDeviceWrapperImpl
 import com.twilio.audioswitch.android.LogWrapper
 import com.twilio.audioswitch.selection.AudioDevice
-import kotlin.reflect.full.declaredFunctions
 
-private const val TAG = "PreConnectedDeviceListener"
+private const val TAG = "BluetoothHeadsetManager"
 
-internal class PreConnectedDeviceListener(
+internal class BluetoothHeadsetManager(
     private val logger: LogWrapper,
     private val bluetoothAdapter: BluetoothAdapter,
     private val deviceCache: BluetoothDeviceCacheManager,
@@ -25,25 +24,17 @@ internal class PreConnectedDeviceListener(
             deviceList.forEach { device ->
                 logger.d(TAG, "Bluetooth " + device.name + " connected")
 
-                val bluetoothHeadset = AudioDevice.BluetoothHeadset(device.name,
+                val bluetoothHeadset = AudioDevice.BluetoothHeadset(
                         BluetoothDeviceWrapperImpl(device))
                 deviceCache.addDevice(bluetoothHeadset)
-                deviceListener?.onBluetoothConnected()
+                deviceListener?.onBluetoothDeviceStateChanged()
             }
         }
     }
 
     override fun onServiceDisconnected(profile: Int) {
         logger.d(TAG, "Bluetooth disconnected")
-    }
-
-    fun selectDevice(deviceWrapper: BluetoothDeviceWrapperImpl) {
-        headsetProxy?.let { proxy ->
-            val result = proxy::class.declaredFunctions.find { it.name == "setActiveDevice" }
-                    ?.call(proxy, deviceWrapper.device) as Boolean
-            if (result) logger.d(TAG, "Set the following bluetooth device to active: " +
-                    deviceWrapper.name)
-        }
+        deviceListener?.onBluetoothDeviceStateChanged()
     }
 
     fun stop() {

@@ -3,17 +3,14 @@ package com.twilio.audioswitch.selection
 import android.bluetooth.BluetoothAdapter
 import android.content.Context
 import android.media.AudioManager
-import com.twilio.audioswitch.android.BluetoothDeviceWrapperImpl
 import com.twilio.audioswitch.android.BluetoothIntentProcessorImpl
 import com.twilio.audioswitch.android.BuildWrapper
 import com.twilio.audioswitch.android.LogWrapper
 import com.twilio.audioswitch.bluetooth.BluetoothController
 import com.twilio.audioswitch.bluetooth.BluetoothDeviceCacheManager
 import com.twilio.audioswitch.bluetooth.BluetoothDeviceConnectionListener
-import com.twilio.audioswitch.bluetooth.BluetoothDeviceConnectionListener.ConnectionError
-import com.twilio.audioswitch.bluetooth.BluetoothDeviceConnectionListener.ConnectionError.SCO_CONNECTION_ERROR
+import com.twilio.audioswitch.bluetooth.BluetoothHeadsetManager
 import com.twilio.audioswitch.bluetooth.BluetoothHeadsetReceiver
-import com.twilio.audioswitch.bluetooth.PreConnectedDeviceListener
 import com.twilio.audioswitch.selection.AudioDevice.BluetoothHeadset
 import com.twilio.audioswitch.selection.AudioDevice.Earpiece
 import com.twilio.audioswitch.selection.AudioDevice.Speakerphone
@@ -56,7 +53,7 @@ class AudioDeviceSelector {
         this.bluetoothController = BluetoothAdapter.getDefaultAdapter()?.let { bluetoothAdapter ->
             BluetoothController(context,
                     bluetoothAdapter,
-                    PreConnectedDeviceListener(logger, bluetoothAdapter, deviceCache),
+                    BluetoothHeadsetManager(logger, bluetoothAdapter, deviceCache),
                     BluetoothHeadsetReceiver(context, logger, BluetoothIntentProcessorImpl(),
                             audioDeviceManager, deviceCache)
             )
@@ -70,13 +67,14 @@ class AudioDeviceSelector {
         logger: LogWrapper,
         audioDeviceManager: AudioDeviceManager,
         wiredHeadsetReceiver: WiredHeadsetReceiver,
-        bluetoothController: BluetoothController?
+        bluetoothController: BluetoothController?,
+        deviceCache: BluetoothDeviceCacheManager
     ) {
         this.logger = logger
-        this.deviceCache = BluetoothDeviceCacheManager(logger)
         this.audioDeviceManager = audioDeviceManager
         this.wiredHeadsetReceiver = wiredHeadsetReceiver
         this.bluetoothController = bluetoothController
+        this.deviceCache = deviceCache
     }
 
     private var logger: LogWrapper = LogWrapper()
@@ -95,29 +93,8 @@ class AudioDeviceSelector {
         STARTED, ACTIVATED, STOPPED
     }
     internal val bluetoothDeviceConnectionListener = object : BluetoothDeviceConnectionListener {
-        override fun onBluetoothConnected() {
+        override fun onBluetoothDeviceStateChanged() {
             enumerateDevices()
-        }
-
-        override fun onBluetoothDisconnected() {
-            enumerateDevices()
-        }
-
-        override fun onBluetoothConnectionError(error: ConnectionError) {
-            if (error is SCO_CONNECTION_ERROR) {
-                logger.d(TAG, "Removing the bluetooth audio device as the selected" +
-                        " device due to a sco connection error.")
-                enumerateDevices()
-            }
-        }
-    }
-
-    private fun updateBluetoothDevices() {
-        deviceCache?.cachedDevices?.let { cachedDevices ->
-            mutableAudioDevices.forEachIndexed { index, device ->
-                if(device is BluetoothHeadset) mutableAudioDevices.removeAt(index)
-            }
-            mutableAudioDevices.addAll(cachedDevices)
         }
     }
 
@@ -265,7 +242,9 @@ class AudioDeviceSelector {
 
     private fun enumerateDevices() {
         mutableAudioDevices.clear()
-        updateBluetoothDevices()
+        deviceCache?.cachedDevices?.let { devices ->
+            if (devices.isNotEmpty()) mutableAudioDevices.add(devices.last())
+        }
         if (wiredHeadsetAvailable) {
             mutableAudioDevices.add(WiredHeadset())
         }
@@ -275,6 +254,8 @@ class AudioDeviceSelector {
         if (audioDeviceManager.hasSpeakerphone()) {
             mutableAudioDevices.add(Speakerphone())
         }
+
+        logger.d(TAG, "Available AudioDevice list updated: $availableAudioDevices")
 
         // Check whether the user selected device is still present
         if (!userSelectedDevicePresent(mutableAudioDevices)) {
@@ -289,16 +270,12 @@ class AudioDeviceSelector {
         } else {
             null
         }
-        
+
         audioDeviceChangeListener?.let { listener ->
             selectedDevice?.let { selectedDevice ->
                 listener.invoke(
                         mutableAudioDevices,
                         selectedDevice)
-
-                if (selectedDevice is BluetoothHeadset) {
-                    bluetoothController?.select(selectedDevice.bluetoothDeviceWrapper as BluetoothDeviceWrapperImpl)
-                }
             } ?: run {
                 listener.invoke(mutableAudioDevices, null)
             }
